@@ -1,0 +1,71 @@
+name: Detect Agent Changes
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'apps/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'apps/**'
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      changed-agents: ${{ steps.changes.outputs.changed-agents }}
+      matrix: ${{ steps.changes.outputs.matrix }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed agents
+        id: changes
+        run: |
+          # Get list of changed files
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }}..${{ github.sha }})
+          else
+            CHANGED_FILES=$(git diff --name-only ${{ github.event.before }}..${{ github.sha }})
+          fi
+
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+
+          # Extract unique agent names from changed paths
+          CHANGED_AGENTS=$(echo "$CHANGED_FILES" | grep "^apps/" | cut -d'/' -f2 | sort -u | tr '\n' ' ')
+
+          echo "Changed agents: $CHANGED_AGENTS"
+
+          # Create matrix for parallel deployment
+          AGENTS_ARRAY="[]"
+          if [ ! -z "$CHANGED_AGENTS" ]; then
+            AGENTS_JSON=$(echo "$CHANGED_AGENTS" | tr ' ' '\n' | grep -v '^$' | jq -R . | jq -s .)
+            AGENTS_ARRAY=$(echo '{"agent":' $AGENTS_JSON '}')
+          fi
+
+          echo "changed-agents=$CHANGED_AGENTS" >> $GITHUB_OUTPUT
+          echo "matrix=$AGENTS_ARRAY" >> $GITHUB_OUTPUT
+
+  trigger-deployment:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.changed-agents != ''
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+
+    steps:
+      - name: Trigger agent deployment
+        run: |
+          echo "🚀 Triggering deployment for agent: ${{ matrix.agent }}"
+
+          # Use GitHub CLI to trigger the deploy workflow
+          gh workflow run deploy-agent.yml \
+            -f agent="${{ matrix.agent }}" \
+            -f run-name="Deploy ${{ matrix.agent }} (triggered by ${{ github.sha }})"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

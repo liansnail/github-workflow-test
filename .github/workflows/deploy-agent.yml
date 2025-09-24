@@ -1,0 +1,184 @@
+name: Deploy Agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      agent:
+        description: 'Agent to deploy'
+        required: true
+        type: choice
+        options:
+          - agent-ar
+          - agent-rs
+          - agent-ts
+          - agent-bt
+      run-name:
+        description: 'Custom run name'
+        required: false
+        type: string
+
+run-name: ${{ inputs.run-name || format('Deploy {0}', inputs.agent) }}
+
+jobs:
+  validate-agent:
+    name: "🔍 Validate ${{ inputs.agent }}"
+    runs-on: ubuntu-latest
+    outputs:
+      agent-type: ${{ steps.detect.outputs.agent-type }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Detect agent type and validate
+        id: detect
+        run: |
+          AGENT="${{ inputs.agent }}"
+
+          if [ ! -d "apps/$AGENT" ]; then
+            echo "❌ Agent directory apps/$AGENT does not exist"
+            exit 1
+          fi
+
+          # Determine agent type based on naming
+          case "$AGENT" in
+            *-ar) AGENT_TYPE="augmented-reality" ;;
+            *-rs) AGENT_TYPE="rust-service" ;;
+            *-ts) AGENT_TYPE="typescript-service" ;;
+            *-bt) AGENT_TYPE="behavior-tree" ;;
+            *) AGENT_TYPE="unknown" ;;
+          esac
+
+          echo "✅ Agent $AGENT validated (type: $AGENT_TYPE)"
+          echo "agent-type=$AGENT_TYPE" >> $GITHUB_OUTPUT
+
+  pre-deploy:
+    name: "🔧 Pre-deploy ${{ inputs.agent }}"
+    needs: validate-agent
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup environment
+        run: |
+          echo "🔧 Setting up environment for ${{ inputs.agent }}"
+          echo "Agent type: ${{ needs.validate-agent.outputs.agent-type }}"
+
+          # Simulate environment setup based on agent type
+          case "${{ needs.validate-agent.outputs.agent-type }}" in
+            "rust-service")
+              echo "📦 Setting up Rust toolchain..."
+              sleep 2
+              ;;
+            "typescript-service")
+              echo "📦 Setting up Node.js environment..."
+              sleep 2
+              ;;
+            "augmented-reality")
+              echo "📦 Setting up AR development environment..."
+              sleep 3
+              ;;
+            "behavior-tree")
+              echo "📦 Setting up behavior tree runtime..."
+              sleep 2
+              ;;
+          esac
+
+          echo "✅ Environment setup complete"
+
+  build:
+    name: "🏗️ Build ${{ inputs.agent }}"
+    needs: [validate-agent, pre-deploy]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build agent
+        run: |
+          echo "🏗️ Building ${{ inputs.agent }}..."
+          cd "apps/${{ inputs.agent }}"
+
+          # Simulate build process
+          case "${{ needs.validate-agent.outputs.agent-type }}" in
+            "rust-service")
+              echo "🦀 Running cargo build..."
+              sleep 5
+              ;;
+            "typescript-service")
+              echo "📜 Running npm build..."
+              sleep 4
+              ;;
+            "augmented-reality")
+              echo "🥽 Building AR components..."
+              sleep 6
+              ;;
+            "behavior-tree")
+              echo "🌳 Compiling behavior tree..."
+              sleep 3
+              ;;
+          esac
+
+          echo "✅ Build completed successfully"
+
+      - name: Run tests
+        run: |
+          echo "🧪 Running tests for ${{ inputs.agent }}..."
+          sleep 3
+          echo "✅ All tests passed"
+
+  deploy:
+    name: "🚀 Deploy ${{ inputs.agent }}"
+    needs: [validate-agent, build]
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Deploy to staging
+        run: |
+          echo "🚀 Deploying ${{ inputs.agent }} to staging..."
+          echo "Agent type: ${{ needs.validate-agent.outputs.agent-type }}"
+          sleep 4
+          echo "✅ Staging deployment complete"
+
+      - name: Run smoke tests
+        run: |
+          echo "💨 Running smoke tests..."
+          sleep 2
+          echo "✅ Smoke tests passed"
+
+      - name: Deploy to production
+        run: |
+          echo "🚀 Deploying ${{ inputs.agent }} to production..."
+          sleep 5
+          echo "✅ Production deployment complete"
+
+  post-deploy:
+    name: "📊 Post-deploy ${{ inputs.agent }}"
+    needs: [validate-agent, deploy]
+    runs-on: ubuntu-latest
+    if: success()
+
+    steps:
+      - name: Health check
+        run: |
+          echo "🏥 Running health checks for ${{ inputs.agent }}..."
+          sleep 3
+          echo "✅ Health checks passed"
+
+      - name: Update monitoring
+        run: |
+          echo "📊 Updating monitoring dashboards..."
+          sleep 2
+          echo "✅ Monitoring updated"
+
+      - name: Notify team
+        run: |
+          echo "📢 Notifying team of successful deployment:"
+          echo "   Agent: ${{ inputs.agent }}"
+          echo "   Type: ${{ needs.validate-agent.outputs.agent-type }}"
+          echo "   Run: ${{ github.run_number }}"
+          echo "✅ Notification sent"
