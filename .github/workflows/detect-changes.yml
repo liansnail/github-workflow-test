@@ -59,21 +59,15 @@ jobs:
       matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
 
     steps:
-      - name: Dispatch deployment for ${{ matrix.agent }}
-        run: |
-          curl -X POST \
-            -H "Accept: application/vnd.github.v3+json" \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            https://api.github.com/repos/${{ github.repository }}/dispatches \
-            -d '{
-              "event_type": "deploy-agent",
-              "client_payload": {
-                "agent": "${{ matrix.agent }}",
-                "triggered_by": "detect-changes",
-                "commit_sha": "${{ github.sha }}",
-                "ref": "${{ github.ref }}"
-              }
-            }'
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-          echo "✅ Dispatched deployment for ${{ matrix.agent }}"
+      - name: Trigger deployment workflow for ${{ matrix.agent }}
+        run: |
+          gh workflow run deploy-agent.yml \
+            -f agent="${{ matrix.agent }}" \
+            -f run-name="Deploy ${{ matrix.agent }} (auto-triggered from ${{ github.sha }})"
+
+          echo "✅ Triggered deployment workflow for ${{ matrix.agent }}"
+        env:
+          GH_TOKEN: ${{ github.token }}

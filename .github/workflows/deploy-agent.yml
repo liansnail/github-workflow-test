@@ -16,15 +16,13 @@ on:
         description: 'Custom run name'
         required: false
         type: string
-  repository_dispatch:
-    types: [deploy-agent]
 
-run-name: ${{ inputs.run-name || format('Deploy {0}', inputs.agent || github.event.client_payload.agent) }}
+run-name: ${{ inputs.run-name || format('Deploy {0}', inputs.agent) }}
 
 
 jobs:
   validate-agent:
-    name: "🔍 Validate ${{ inputs.agent || github.event.client_payload.agent }}"
+    name: "🔍 Validate ${{ inputs.agent }}"
     runs-on: ubuntu-latest
     outputs:
       agent-type: ${{ steps.detect.outputs.agent-type }}
@@ -36,7 +34,7 @@ jobs:
       - name: Detect agent type and validate
         id: detect
         run: |
-          AGENT="${{ inputs.agent || github.event.client_payload.agent }}"
+          AGENT="${{ inputs.agent }}"
 
           if [ ! -d "apps/$AGENT" ]; then
             echo "❌ Agent directory apps/$AGENT does not exist"
@@ -56,7 +54,7 @@ jobs:
           echo "agent-type=$AGENT_TYPE" >> $GITHUB_OUTPUT
 
   pre-deploy:
-    name: "🔧 Pre-deploy ${{ inputs.agent || github.event.client_payload.agent }}"
+    name: "🔧 Pre-deploy ${{ inputs.agent }}"
     needs: validate-agent
     runs-on: ubuntu-latest
 
@@ -66,7 +64,7 @@ jobs:
 
       - name: Setup environment
         run: |
-          echo "🔧 Setting up environment for ${{ inputs.agent || github.event.client_payload.agent }}"
+          echo "🔧 Setting up environment for ${{ inputs.agent }}"
           echo "Agent type: ${{ needs.validate-agent.outputs.agent-type }}"
 
           # Simulate environment setup based on agent type
@@ -92,7 +90,7 @@ jobs:
           echo "✅ Environment setup complete"
 
   build:
-    name: "🏗️ Build ${{ inputs.agent || github.event.client_payload.agent }}"
+    name: "🏗️ Build ${{ inputs.agent }}"
     needs: [validate-agent, pre-deploy]
     runs-on: ubuntu-latest
 
@@ -102,8 +100,8 @@ jobs:
 
       - name: Build agent
         run: |
-          echo "🏗️ Building ${{ inputs.agent || github.event.client_payload.agent }}..."
-          cd "apps/${{ inputs.agent || github.event.client_payload.agent }}"
+          echo "🏗️ Building ${{ inputs.agent }}..."
+          cd "apps/${{ inputs.agent }}"
 
           # Simulate build process
           case "${{ needs.validate-agent.outputs.agent-type }}" in
@@ -129,12 +127,12 @@ jobs:
 
       - name: Run tests
         run: |
-          echo "🧪 Running tests for ${{ inputs.agent || github.event.client_payload.agent }}..."
+          echo "🧪 Running tests for ${{ inputs.agent }}..."
           sleep 3
           echo "✅ All tests passed"
 
   deploy:
-    name: "🚀 Deploy ${{ inputs.agent || github.event.client_payload.agent }}"
+    name: "🚀 Deploy ${{ inputs.agent }}"
     needs: [validate-agent, build]
     runs-on: ubuntu-latest
     environment: production
@@ -142,7 +140,7 @@ jobs:
     steps:
       - name: Deploy to staging
         run: |
-          echo "🚀 Deploying ${{ inputs.agent || github.event.client_payload.agent }} to staging..."
+          echo "🚀 Deploying ${{ inputs.agent }} to staging..."
           echo "Agent type: ${{ needs.validate-agent.outputs.agent-type }}"
           sleep 4
           echo "✅ Staging deployment complete"
@@ -155,12 +153,12 @@ jobs:
 
       - name: Deploy to production
         run: |
-          echo "🚀 Deploying ${{ inputs.agent || github.event.client_payload.agent }} to production..."
+          echo "🚀 Deploying ${{ inputs.agent }} to production..."
           sleep 5
           echo "✅ Production deployment complete"
 
   post-deploy:
-    name: "📊 Post-deploy ${{ inputs.agent || github.event.client_payload.agent }}"
+    name: "📊 Post-deploy ${{ inputs.agent }}"
     needs: [validate-agent, deploy]
     runs-on: ubuntu-latest
     if: success()
@@ -168,7 +166,7 @@ jobs:
     steps:
       - name: Health check
         run: |
-          echo "🏥 Running health checks for ${{ inputs.agent || github.event.client_payload.agent }}..."
+          echo "🏥 Running health checks for ${{ inputs.agent }}..."
           sleep 3
           echo "✅ Health checks passed"
 
@@ -181,7 +179,7 @@ jobs:
       - name: Notify team
         run: |
           echo "📢 Notifying team of successful deployment:"
-          echo "   Agent: ${{ inputs.agent || github.event.client_payload.agent }}"
+          echo "   Agent: ${{ inputs.agent }}"
           echo "   Type: ${{ needs.validate-agent.outputs.agent-type }}"
           echo "   Run: ${{ github.run_number }}"
           echo "✅ Notification sent"
