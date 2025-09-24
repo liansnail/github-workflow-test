@@ -1,4 +1,4 @@
-name: Detect Agent Changes
+name: Detect Agent Changes (GitHub App)
 
 on:
   push:
@@ -59,6 +59,13 @@ jobs:
       matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
 
     steps:
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -70,4 +77,4 @@ jobs:
 
           echo "✅ Triggered deployment workflow for ${{ matrix.agent }}"
         env:
-          GH_TOKEN: ${{ secrets.WORKFLOW_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
