@@ -51,17 +51,12 @@ jobs:
           echo "changed-agents=$CHANGED_AGENTS" >> $GITHUB_OUTPUT
           echo "matrix=$AGENTS_ARRAY" >> $GITHUB_OUTPUT
 
-  display-changes:
+  deploy-agents:
     needs: detect-changes
     if: needs.detect-changes.outputs.changed-agents != ''
-    runs-on: ubuntu-latest
     strategy:
       matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
-
-    steps:
-      - name: Display detected agent changes
-        run: |
-          echo "🚀 Detected changes for agent: ${{ matrix.agent }}"
-          echo "Agent name: ${{ matrix.agent }}"
-          echo "Commit SHA: ${{ github.sha }}"
-          echo "This agent should be deployed!"
+    uses: ./.github/workflows/deploy-agent.yml
+    with:
+      agent: ${{ matrix.agent }}
+    secrets: inherit

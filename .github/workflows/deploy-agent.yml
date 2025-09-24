@@ -16,6 +16,12 @@ on:
         description: 'Custom run name'
         required: false
         type: string
+  workflow_call:
+    inputs:
+      agent:
+        description: 'Agent to deploy'
+        required: true
+        type: string
 
 run-name: ${{ inputs.run-name || format('Deploy {0}', inputs.agent) }}
 
