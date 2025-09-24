@@ -108,7 +108,9 @@ jobs:
     needs: [detect-changes, build-agents]
     if: needs.detect-changes.outputs.changed-agents != ''
     runs-on: ubuntu-latest
-    environment: production
+    environment:
+      name: production-${{ matrix.agent }}
+      url: https://github.com/${{ github.repository }}/deployments
     strategy:
       matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
 

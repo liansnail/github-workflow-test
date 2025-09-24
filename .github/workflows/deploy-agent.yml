@@ -135,7 +135,9 @@ jobs:
     name: "🚀 Deploy ${{ inputs.agent }}"
     needs: [validate-agent, build]
     runs-on: ubuntu-latest
-    environment: production
+    environment:
+      name: production-${{ inputs.agent }}
+      url: https://github.com/${{ github.repository }}/deployments
 
     steps:
       - name: Deploy to staging
