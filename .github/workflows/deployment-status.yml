@@ -68,7 +68,7 @@ jobs:
             const deployedList = deployedAgents.map(a => `${a.name} [${a.tag}]`).join(', ');
             const failedList = failedAgents.map(a => `${a.name} [${a.tag}]`).join(', ');
 
-            const summary = `
+            let summary = `
             # ${statusIcon} Deployment Status Report
 
             **Commit:** ${commitMessage}
