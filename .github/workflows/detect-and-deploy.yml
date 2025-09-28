@@ -115,7 +115,158 @@ jobs:
       matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine agent type
+        id: agent-info
+        run: |
+          AGENT="${{ matrix.agent }}"
+
+          # Determine agent type based on naming
+          case "$AGENT" in
+            *-ar) AGENT_TYPE="augmented-reality" ;;
+            *-rs) AGENT_TYPE="rust-service" ;;
+            *-ts) AGENT_TYPE="typescript-service" ;;
+            *-bt) AGENT_TYPE="behavior-tree" ;;
+            *) AGENT_TYPE="unknown" ;;
+          esac
+
+          echo "agent-type=$AGENT_TYPE" >> $GITHUB_OUTPUT
+          echo "agent-name=$AGENT" >> $GITHUB_OUTPUT
+
+      - name: Create deployment
+        id: deployment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deployment = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha,
+              environment: `production-${{ matrix.agent }}`,
+              description: `Deploy ${{ matrix.agent }} (${{ steps.agent-info.outputs.agent-type }})`,
+              auto_merge: false,
+              required_contexts: [],
+              payload: {
+                agent: '${{ matrix.agent }}',
+                agent_type: '${{ steps.agent-info.outputs.agent-type }}',
+                commit_message: context.payload.head_commit?.message || context.payload.pull_request?.title || 'Manual deployment',
+                changed_files: `${{ needs.detect-changes.outputs.changed-agents }}`,
+                deployment_trigger: '${{ github.event_name }}',
+                branch: '${{ github.ref_name }}'
+              },
+              transient_environment: false,
+              production_environment: true
+            });
+
+            core.setOutput('deployment-id', deployment.data.id);
+            return deployment.data.id;
+
+      - name: Set deployment status to in_progress
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: '${{ steps.deployment.outputs.deployment-id }}',
+              state: 'in_progress',
+              description: 'Deployment in progress for ${{ matrix.agent }}',
+              environment_url: `https://github.com/${{ github.repository }}/deployments`,
+              log_url: `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+            });
+
       - name: Deploy agent
         run: |
-          echo "🚀 Deploying ${{ matrix.agent }} to production..."
+          echo "🚀 Deploying ${{ matrix.agent }} (${{ steps.agent-info.outputs.agent-type }}) to production..."
+          echo "📦 Agent: ${{ matrix.agent }}"
+          echo "🏷️  Type: ${{ steps.agent-info.outputs.agent-type }}"
+          echo "🔗 Deployment ID: ${{ steps.deployment.outputs.deployment-id }}"
+          echo "📝 Trigger: ${{ github.event_name }}"
+          echo "🌿 Branch: ${{ github.ref_name }}"
+
+          # Simulate deployment process
+          sleep 5
+
           echo "✅ Deployment completed for ${{ matrix.agent }}"
+
+      - name: Set deployment status to success
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: '${{ steps.deployment.outputs.deployment-id }}',
+              state: 'success',
+              description: 'Successfully deployed ${{ matrix.agent }} (${{ steps.agent-info.outputs.agent-type }})',
+              environment_url: `https://production-${{ matrix.agent }}.example.com`,
+              log_url: `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+            });
+
+      - name: Set deployment status to failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: '${{ steps.deployment.outputs.deployment-id }}',
+              state: 'failure',
+              description: 'Failed to deploy ${{ matrix.agent }} (${{ steps.agent-info.outputs.agent-type }})',
+              environment_url: `https://production-${{ matrix.agent }}.example.com`,
+              log_url: `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+            });
+
+      - name: Add deployment labels
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Add labels to the commit/PR for tracking
+            const labels = [
+              `deployed:${{ matrix.agent }}`,
+              `agent-type:${{ steps.agent-info.outputs.agent-type }}`,
+              `deployment:${{ github.event_name }}`
+            ];
+
+            // If this is a PR, add labels to the PR
+            if (context.payload.pull_request) {
+              try {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.payload.pull_request.number,
+                  labels: labels
+                });
+              } catch (error) {
+                console.log('Could not add labels to PR:', error.message);
+              }
+            }
+
+            // Create a comment with deployment summary
+            const deploymentInfo = `
+            ## 🚀 Deployment Summary
+
+            **Agent:** \`${{ matrix.agent }}\`
+            **Type:** \`${{ steps.agent-info.outputs.agent-type }}\`
+            **Environment:** \`production-${{ matrix.agent }}\`
+            **Deployment ID:** \`${{ steps.deployment.outputs.deployment-id }}\`
+            **Status:** ${context.job.status === 'success' ? '✅ Success' : '❌ Failed'}
+            **Trigger:** \`${{ github.event_name }}\`
+            **Branch:** \`${{ github.ref_name }}\`
+
+            [View Deployment Details](https://github.com/${{ github.repository }}/deployments)
+            `;
+
+            if (context.payload.pull_request) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                body: deploymentInfo
+              });
+            }
