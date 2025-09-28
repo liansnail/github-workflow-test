@@ -105,6 +105,7 @@ jobs:
           echo "✅ Build and tests completed for ${{ matrix.agent }}"
 
   deploy-agents:
+    name: Deploy ${{ matrix.agent }} [${{ contains(matrix.agent, '-ar') && 'AR' || contains(matrix.agent, '-rs') && 'RS' || contains(matrix.agent, '-ts') && 'TS' || contains(matrix.agent, '-bt') && 'BT' || '??' }}]
     needs: [detect-changes, build-agents]
     if: needs.detect-changes.outputs.changed-agents != ''
     runs-on: ubuntu-latest
