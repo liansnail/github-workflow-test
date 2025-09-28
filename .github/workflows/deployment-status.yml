@@ -1,0 +1,122 @@
+name: Deployment Status
+
+run-name: "📊 Status → ${{ github.event.workflow_run.head_commit.message }} (${{ github.event.workflow_run.conclusion }})"
+
+on:
+  workflow_run:
+    workflows: ["Detect Changes and Deploy"]
+    types:
+      - completed
+
+jobs:
+  deployment-status:
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion != 'cancelled'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Analyze deployment results
+        id: analyze
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const workflowRun = context.payload.workflow_run;
+            const conclusion = workflowRun.conclusion; // success, failure, etc.
+            const commitMessage = workflowRun.head_commit.message;
+
+            console.log('Analyzing workflow run:', workflowRun.id);
+            console.log('Conclusion:', conclusion);
+            console.log('Commit message:', commitMessage);
+
+            // Get the workflow run details and jobs
+            const jobs = await github.rest.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: workflowRun.id,
+            });
+
+            console.log('Jobs found:', jobs.data.jobs.length);
+
+            // Find deploy-agent jobs
+            const deployJobs = jobs.data.jobs.filter(job =>
+              job.name.startsWith('Deploy ') && job.name.includes('[')
+            );
+
+            console.log('Deploy jobs:', deployJobs.map(j => j.name));
+
+            let deployedAgents = [];
+            let failedAgents = [];
+
+            deployJobs.forEach(job => {
+              // Extract agent info from job name like "Deploy agent-ar [AR]"
+              const match = job.name.match(/Deploy ([\w-]+) \[(\w+)\]/);
+              if (match) {
+                const [, agentName, agentTag] = match;
+
+                if (job.conclusion === 'success') {
+                  deployedAgents.push({ name: agentName, tag: agentTag });
+                } else {
+                  failedAgents.push({ name: agentName, tag: agentTag });
+                }
+              }
+            });
+
+            // Create summary
+            const statusIcon = conclusion === 'success' ? '✅' : '❌';
+            const deployedList = deployedAgents.map(a => `${a.name} [${a.tag}]`).join(', ');
+            const failedList = failedAgents.map(a => `${a.name} [${a.tag}]`).join(', ');
+
+            const summary = `
+            # ${statusIcon} Deployment Status Report
+
+            **Commit:** ${commitMessage}
+            **Overall Status:** ${conclusion.toUpperCase()}
+            **Workflow Run:** [#${workflowRun.run_number}](${workflowRun.html_url})
+
+            ## Results Summary
+
+            ${deployedAgents.length > 0 ? `✅ **Successfully Deployed (${deployedAgents.length}):**\n${deployedList}\n` : ''}
+            ${failedAgents.length > 0 ? `❌ **Failed Deployments (${failedAgents.length}):**\n${failedList}\n` : ''}
+            ${deployedAgents.length === 0 && failedAgents.length === 0 ? '⚠️ **No agent deployments detected**' : ''}
+
+            ## Agent Details
+
+            | Agent | Tag | Status | Environment |
+            |-------|-----|---------|-------------|
+            `;
+
+            [...deployedAgents, ...failedAgents].forEach(agent => {
+              const status = deployedAgents.includes(agent) ? '✅ Success' : '❌ Failed';
+              summary += `| \`${agent.name}\` | ${agent.tag} | ${status} | production |\n`;
+            });
+
+            await core.summary
+              .addRaw(summary)
+              .write();
+
+            // Set outputs for run name update (if we could)
+            core.setOutput('deployed-agents', deployedList || 'none');
+            core.setOutput('status', conclusion);
+
+            return {
+              deployed: deployedAgents.length,
+              failed: failedAgents.length,
+              status: conclusion
+            };
+
+      - name: Create status notification
+        if: always()
+        run: |
+          DEPLOYED="${{ steps.analyze.outputs.deployed-agents }}"
+          STATUS="${{ steps.analyze.outputs.status }}"
+
+          if [ "$STATUS" = "success" ]; then
+            echo "::notice title=Deployment Complete::✅ Successfully deployed: $DEPLOYED"
+          else
+            echo "::error title=Deployment Failed::❌ Deployment failed for some agents"
+          fi
+
+          echo "📊 Deployment Status Report generated"
+          echo "🔗 Check the Summary tab for detailed information"
