@@ -160,17 +160,25 @@ jobs:
               production_environment: true
             });
 
-            core.setOutput('deployment-id', deployment.data.id);
+            console.log('Created deployment with ID:', deployment.data.id);
+            core.setOutput('deployment-id', deployment.data.id.toString());
             return deployment.data.id;
 
       - name: Set deployment status to in_progress
         uses: actions/github-script@v7
         with:
           script: |
+            const deploymentId = '${{ steps.deployment.outputs.deployment-id }}';
+            console.log('Using deployment ID:', deploymentId);
+
+            if (!deploymentId || deploymentId === '') {
+              throw new Error('Deployment ID is empty or undefined');
+            }
+
             await github.rest.repos.createDeploymentStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              deployment_id: '${{ steps.deployment.outputs.deployment-id }}',
+              deployment_id: parseInt(deploymentId),
               state: 'in_progress',
               description: 'Deployment in progress for ${{ matrix.agent }}',
               environment_url: `https://github.com/${{ github.repository }}/deployments`,
@@ -186,8 +194,16 @@ jobs:
           echo "📝 Trigger: ${{ github.event_name }}"
           echo "🌿 Branch: ${{ github.ref_name }}"
 
+          # Demo deployment: read and display the agent's README
+          if [ -f "apps/${{ matrix.agent }}/README.md" ]; then
+            echo "📄 Deploying content from README.md:"
+            cat "apps/${{ matrix.agent }}/README.md"
+          else
+            echo "📝 No README.md found, creating deployment record only"
+          fi
+
           # Simulate deployment process
-          sleep 5
+          sleep 2
 
           echo "✅ Deployment completed for ${{ matrix.agent }}"
 
@@ -196,10 +212,13 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
+            const deploymentId = '${{ steps.deployment.outputs.deployment-id }}';
+            console.log('Setting success status for deployment ID:', deploymentId);
+
             await github.rest.repos.createDeploymentStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              deployment_id: '${{ steps.deployment.outputs.deployment-id }}',
+              deployment_id: parseInt(deploymentId),
               state: 'success',
               description: 'Successfully deployed ${{ matrix.agent }} (${{ steps.agent-info.outputs.agent-type }})',
               environment_url: `https://production-${{ matrix.agent }}.example.com`,
@@ -211,10 +230,13 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
+            const deploymentId = '${{ steps.deployment.outputs.deployment-id }}';
+            console.log('Setting failure status for deployment ID:', deploymentId);
+
             await github.rest.repos.createDeploymentStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              deployment_id: '${{ steps.deployment.outputs.deployment-id }}',
+              deployment_id: parseInt(deploymentId),
               state: 'failure',
               description: 'Failed to deploy ${{ matrix.agent }} (${{ steps.agent-info.outputs.agent-type }})',
               environment_url: `https://production-${{ matrix.agent }}.example.com`,
