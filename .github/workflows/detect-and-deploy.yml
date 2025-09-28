@@ -1,5 +1,7 @@
 name: Detect Changes and Deploy
 
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Manual Deploy: {0} → {1}', inputs.agents, inputs.environment) || format('Auto Deploy: {0}', github.event.head_commit.message || github.event.pull_request.title || 'Unknown') }}
+
 on:
   push:
     branches: [ main, develop ]
@@ -9,6 +11,22 @@ on:
     branches: [ main ]
     paths:
       - 'apps/**'
+  workflow_dispatch:
+    inputs:
+      agents:
+        description: 'Agents to deploy (comma-separated: agent-ar, agent-ts, agent-rs, agent-bt)'
+        required: false
+        default: 'auto-detect'
+        type: string
+      environment:
+        description: 'Target environment'
+        required: false
+        default: 'production'
+        type: choice
+        options:
+        - production
+        - staging
+        - development
 
 jobs:
   detect-changes:
@@ -26,11 +44,32 @@ jobs:
       - name: Detect changed agents
         id: changes
         run: |
-          # Get list of changed files
-          if [ "${{ github.event_name }}" == "pull_request" ]; then
-            CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }}..${{ github.sha }})
+          # Handle manual workflow dispatch
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            AGENTS_INPUT="${{ inputs.agents }}"
+
+            if [ "$AGENTS_INPUT" == "auto-detect" ] || [ -z "$AGENTS_INPUT" ]; then
+              echo "Manual dispatch with auto-detect - checking recent changes"
+              CHANGED_FILES=$(git diff --name-only HEAD~1..HEAD)
+            else
+              echo "Manual dispatch with specified agents: $AGENTS_INPUT"
+              CHANGED_AGENTS=$(echo "$AGENTS_INPUT" | tr ',' ' ' | tr -d ' ')
+
+              # Create matrix directly from input
+              AGENTS_JSON=$(echo "$CHANGED_AGENTS" | tr ' ' '\n' | grep -v '^$' | jq -R . | jq -s .)
+              AGENTS_ARRAY=$(echo '{"agent":' $AGENTS_JSON '}')
+
+              echo "changed-agents=$CHANGED_AGENTS" >> $GITHUB_OUTPUT
+              echo "matrix=$AGENTS_ARRAY" >> $GITHUB_OUTPUT
+              exit 0
+            fi
           else
-            CHANGED_FILES=$(git diff --name-only ${{ github.event.before }}..${{ github.sha }})
+            # Get list of changed files for push/PR
+            if [ "${{ github.event_name }}" == "pull_request" ]; then
+              CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }}..${{ github.sha }})
+            else
+              CHANGED_FILES=$(git diff --name-only ${{ github.event.before }}..${{ github.sha }})
+            fi
           fi
 
           echo "Changed files:"
