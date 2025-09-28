@@ -109,7 +109,7 @@ jobs:
     if: needs.detect-changes.outputs.changed-agents != ''
     runs-on: ubuntu-latest
     environment:
-      name: production-${{ matrix.agent }}
+      name: production
       url: https://github.com/${{ github.repository }}/deployments
     strategy:
       matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
@@ -123,17 +123,33 @@ jobs:
         run: |
           AGENT="${{ matrix.agent }}"
 
-          # Determine agent type based on naming
+          # Determine agent type and tag based on naming
           case "$AGENT" in
-            *-ar) AGENT_TYPE="augmented-reality" ;;
-            *-rs) AGENT_TYPE="rust-service" ;;
-            *-ts) AGENT_TYPE="typescript-service" ;;
-            *-bt) AGENT_TYPE="behavior-tree" ;;
-            *) AGENT_TYPE="unknown" ;;
+            *-ar)
+              AGENT_TYPE="augmented-reality"
+              AGENT_TAG="[AR]"
+              ;;
+            *-rs)
+              AGENT_TYPE="rust-service"
+              AGENT_TAG="[RS]"
+              ;;
+            *-ts)
+              AGENT_TYPE="typescript-service"
+              AGENT_TAG="[TS]"
+              ;;
+            *-bt)
+              AGENT_TYPE="behavior-tree"
+              AGENT_TAG="[BT]"
+              ;;
+            *)
+              AGENT_TYPE="unknown"
+              AGENT_TAG="[??]"
+              ;;
           esac
 
           echo "agent-type=$AGENT_TYPE" >> $GITHUB_OUTPUT
           echo "agent-name=$AGENT" >> $GITHUB_OUTPUT
+          echo "agent-tag=$AGENT_TAG" >> $GITHUB_OUTPUT
 
       - name: Initialize deployment tracking
         id: deployment
@@ -143,7 +159,7 @@ jobs:
           DEPLOYMENT_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
           echo "🚀 Starting deployment for ${{ matrix.agent }}"
-          echo "📦 Agent: ${{ matrix.agent }}"
+          echo "📦 Agent: ${{ matrix.agent }} ${{ steps.agent-info.outputs.agent-tag }}"
           echo "🏷️  Type: ${{ steps.agent-info.outputs.agent-type }}"
           echo "🆔 Deployment ID: $DEPLOYMENT_ID"
           echo "⏰ Started: $DEPLOYMENT_TIME"
@@ -158,8 +174,8 @@ jobs:
 
       - name: Deploy agent
         run: |
-          echo "🚀 Deploying ${{ matrix.agent }} (${{ steps.agent-info.outputs.agent-type }}) to production..."
-          echo "📦 Agent: ${{ matrix.agent }}"
+          echo "🚀 Deploying ${{ matrix.agent }} ${{ steps.agent-info.outputs.agent-tag }} to production..."
+          echo "📦 Agent: ${{ matrix.agent }} ${{ steps.agent-info.outputs.agent-tag }}"
           echo "🏷️  Type: ${{ steps.agent-info.outputs.agent-type }}"
           echo "🔗 Deployment ID: ${{ steps.deployment.outputs.deployment-id }}"
           echo "📝 Trigger: ${{ github.event_name }}"
@@ -176,7 +192,7 @@ jobs:
           # Simulate deployment process
           sleep 2
 
-          echo "✅ Deployment completed for ${{ matrix.agent }}"
+          echo "✅ Deployment completed for ${{ matrix.agent }} ${{ steps.agent-info.outputs.agent-tag }}"
 
       - name: Create deployment tag and summary
         if: always()
@@ -198,6 +214,7 @@ jobs:
 
             // Create a deployment tag for successful deployments
             if (jobStatus === 'success') {
+              const agentTag = '${{ steps.agent-info.outputs.agent-tag }}';
               const tagName = `${agent}-${new Date().toISOString().slice(0,10)}-${commitSha.slice(0,7)}`;
 
               try {
@@ -205,7 +222,7 @@ jobs:
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   tag: tagName,
-                  message: `Deploy ${agent} (${agentType}) - ${deploymentId}`,
+                  message: `Deploy ${agent} ${agentTag} (${agentType}) - ${deploymentId}`,
                   object: commitSha,
                   type: 'commit'
                 });
@@ -244,15 +261,17 @@ jobs:
             ${core.getInput('deployment-tag') ? `**Deployment Tag**: \`${core.getInput('deployment-tag')}\`` : ''}
             `;
 
+            const agentTag = '${{ steps.agent-info.outputs.agent-tag }}';
+
             await core.summary
-              .addHeading(`${statusIcon} Deployment: ${agent}`)
+              .addHeading(`${statusIcon} Deployment: ${agent} ${agentTag}`)
               .addTable([
                 [{data: 'Field', header: true}, {data: 'Value', header: true}],
-                ['Agent', agent],
+                ['Agent', `${agent} ${agentTag}`],
                 ['Type', agentType],
                 ['Status', status],
                 ['Deployment ID', deploymentId],
-                ['Environment', `production-${agent}`],
+                ['Environment', 'production'],
                 ['Trigger', '${{ github.event_name }}'],
                 ['Branch', '${{ github.ref_name }}'],
                 ['Commit', `${commitSha.slice(0,7)}`],
@@ -267,10 +286,11 @@ jobs:
           DEPLOYMENT_ID="${{ steps.deployment.outputs.deployment-id }}"
           AGENT="${{ matrix.agent }}"
           AGENT_TYPE="${{ steps.agent-info.outputs.agent-type }}"
+          AGENT_TAG="${{ steps.agent-info.outputs.agent-tag }}"
           STATUS="${{ job.status }}"
 
           echo "📊 Recording deployment result:"
-          echo "  Agent: $AGENT"
+          echo "  Agent: $AGENT $AGENT_TAG"
           echo "  Type: $AGENT_TYPE"
           echo "  Deployment ID: $DEPLOYMENT_ID"
           echo "  Status: $STATUS"
@@ -281,10 +301,11 @@ jobs:
           cat > "deployment-logs/${AGENT}-deployment.json" << EOF
           {
             "agent": "$AGENT",
+            "agent_tag": "$AGENT_TAG",
             "agent_type": "$AGENT_TYPE",
             "deployment_id": "$DEPLOYMENT_ID",
             "status": "$STATUS",
-            "environment": "production-$AGENT",
+            "environment": "production",
             "trigger": "${{ github.event_name }}",
             "branch": "${{ github.ref_name }}",
             "commit": "${{ github.sha }}",
@@ -298,9 +319,9 @@ jobs:
           echo "✅ Deployment record created at deployment-logs/${AGENT}-deployment.json"
 
           if [ "$STATUS" = "success" ]; then
-            echo "::notice title=Deployment Success::Successfully deployed $AGENT ($AGENT_TYPE) with ID $DEPLOYMENT_ID"
+            echo "::notice title=Deployment Success::Successfully deployed $AGENT $AGENT_TAG ($AGENT_TYPE) with ID $DEPLOYMENT_ID"
           else
-            echo "::error title=Deployment Failed::Failed to deploy $AGENT ($AGENT_TYPE) with ID $DEPLOYMENT_ID"
+            echo "::error title=Deployment Failed::Failed to deploy $AGENT $AGENT_TAG ($AGENT_TYPE) with ID $DEPLOYMENT_ID"
           fi
 
   deployment-summary:
@@ -334,14 +355,24 @@ jobs:
             `;
 
             for (const agent of agents) {
-              // Determine agent type
+              // Determine agent type and tag
               let agentType = 'unknown';
-              if (agent.endsWith('-ar')) agentType = 'augmented-reality';
-              else if (agent.endsWith('-rs')) agentType = 'rust-service';
-              else if (agent.endsWith('-ts')) agentType = 'typescript-service';
-              else if (agent.endsWith('-bt')) agentType = 'behavior-tree';
+              let agentTag = '[??]';
+              if (agent.endsWith('-ar')) {
+                agentType = 'augmented-reality';
+                agentTag = '[AR]';
+              } else if (agent.endsWith('-rs')) {
+                agentType = 'rust-service';
+                agentTag = '[RS]';
+              } else if (agent.endsWith('-ts')) {
+                agentType = 'typescript-service';
+                agentTag = '[TS]';
+              } else if (agent.endsWith('-bt')) {
+                agentType = 'behavior-tree';
+                agentTag = '[BT]';
+              }
 
-              summaryTable += `| \`${agent}\` | ${agentType} | ⏳ In Progress | \`production-${agent}\` |\n`;
+              summaryTable += `| \`${agent}\` ${agentTag} | ${agentType} | ⏳ In Progress | \`production\` |\n`;
             }
 
             summaryTable += `\n> 💡 **Tip:** You can filter deployments by agent using tags like \`${agents[0]}-YYYY-MM-DD-COMMIT\` or check individual workflow runs for detailed logs.`;
