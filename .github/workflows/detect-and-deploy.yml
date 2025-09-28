@@ -135,55 +135,53 @@ jobs:
           echo "agent-type=$AGENT_TYPE" >> $GITHUB_OUTPUT
           echo "agent-name=$AGENT" >> $GITHUB_OUTPUT
 
-      - name: Create deployment
+      - name: Start deployment
         id: deployment
         uses: actions/github-script@v7
         with:
           script: |
-            const deployment = await github.rest.repos.createDeployment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              ref: context.sha,
-              environment: `production-${{ matrix.agent }}`,
-              description: `Deploy ${{ matrix.agent }} (${{ steps.agent-info.outputs.agent-type }})`,
-              auto_merge: false,
-              required_contexts: [],
-              payload: {
-                agent: '${{ matrix.agent }}',
-                agent_type: '${{ steps.agent-info.outputs.agent-type }}',
-                commit_message: context.payload.head_commit?.message || context.payload.pull_request?.title || 'Manual deployment',
-                changed_files: `${{ needs.detect-changes.outputs.changed-agents }}`,
-                deployment_trigger: '${{ github.event_name }}',
-                branch: '${{ github.ref_name }}'
-              },
-              transient_environment: false,
-              production_environment: true
-            });
+            try {
+              const deployment = await github.rest.repos.createDeployment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: context.sha,
+                environment: `production-${{ matrix.agent }}`,
+                description: `Deploy ${{ matrix.agent }} (${{ steps.agent-info.outputs.agent-type }})`,
+                auto_merge: false,
+                required_contexts: [],
+                payload: {
+                  agent: '${{ matrix.agent }}',
+                  agent_type: '${{ steps.agent-info.outputs.agent-type }}',
+                  commit_message: context.payload.head_commit?.message || context.payload.pull_request?.title || 'Manual deployment',
+                  changed_files: `${{ needs.detect-changes.outputs.changed-agents }}`,
+                  deployment_trigger: '${{ github.event_name }}',
+                  branch: '${{ github.ref_name }}'
+                },
+                transient_environment: false,
+                production_environment: true
+              });
 
-            console.log('Created deployment with ID:', deployment.data.id);
-            core.setOutput('deployment-id', deployment.data.id.toString());
-            return deployment.data.id;
+              console.log('Created deployment:', deployment.data);
+              core.setOutput('deployment-id', deployment.data.id);
+              core.setOutput('deployment-url', deployment.data.url);
 
-      - name: Set deployment status to in_progress
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const deploymentId = '${{ steps.deployment.outputs.deployment-id }}';
-            console.log('Using deployment ID:', deploymentId);
+              // Set initial status to in_progress
+              await github.rest.repos.createDeploymentStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                deployment_id: deployment.data.id,
+                state: 'in_progress',
+                description: 'Deployment in progress for ${{ matrix.agent }}',
+                environment_url: `https://production-${{ matrix.agent }}.example.com`,
+                log_url: `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+              });
 
-            if (!deploymentId || deploymentId === '') {
-              throw new Error('Deployment ID is empty or undefined');
+              return deployment.data.id;
+            } catch (error) {
+              console.error('Deployment creation failed:', error);
+              core.setFailed(`Failed to create deployment: ${error.message}`);
+              throw error;
             }
-
-            await github.rest.repos.createDeploymentStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              deployment_id: parseInt(deploymentId),
-              state: 'in_progress',
-              description: 'Deployment in progress for ${{ matrix.agent }}',
-              environment_url: `https://github.com/${{ github.repository }}/deployments`,
-              log_url: `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`
-            });
 
       - name: Deploy agent
         run: |
@@ -207,88 +205,103 @@ jobs:
 
           echo "✅ Deployment completed for ${{ matrix.agent }}"
 
-      - name: Set deployment status to success
-        if: success()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const deploymentId = '${{ steps.deployment.outputs.deployment-id }}';
-            console.log('Setting success status for deployment ID:', deploymentId);
-
-            await github.rest.repos.createDeploymentStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              deployment_id: parseInt(deploymentId),
-              state: 'success',
-              description: 'Successfully deployed ${{ matrix.agent }} (${{ steps.agent-info.outputs.agent-type }})',
-              environment_url: `https://production-${{ matrix.agent }}.example.com`,
-              log_url: `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`
-            });
-
-      - name: Set deployment status to failure
-        if: failure()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const deploymentId = '${{ steps.deployment.outputs.deployment-id }}';
-            console.log('Setting failure status for deployment ID:', deploymentId);
-
-            await github.rest.repos.createDeploymentStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              deployment_id: parseInt(deploymentId),
-              state: 'failure',
-              description: 'Failed to deploy ${{ matrix.agent }} (${{ steps.agent-info.outputs.agent-type }})',
-              environment_url: `https://production-${{ matrix.agent }}.example.com`,
-              log_url: `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`
-            });
-
-      - name: Add deployment labels
+      - name: Update deployment status
         if: always()
         uses: actions/github-script@v7
         with:
           script: |
-            // Add labels to the commit/PR for tracking
-            const labels = [
-              `deployed:${{ matrix.agent }}`,
-              `agent-type:${{ steps.agent-info.outputs.agent-type }}`,
-              `deployment:${{ github.event_name }}`
-            ];
+            const deploymentId = '${{ steps.deployment.outputs.deployment-id }}';
+            const jobStatus = '${{ job.status }}';
 
-            // If this is a PR, add labels to the PR
+            console.log('Updating deployment status:', { deploymentId, jobStatus });
+
+            if (!deploymentId) {
+              console.log('No deployment ID found, skipping status update');
+              return;
+            }
+
+            const state = jobStatus === 'success' ? 'success' : 'failure';
+            const description = state === 'success'
+              ? 'Successfully deployed ${{ matrix.agent }} (${{ steps.agent-info.outputs.agent-type }})'
+              : 'Failed to deploy ${{ matrix.agent }} (${{ steps.agent-info.outputs.agent-type }})';
+
+            try {
+              await github.rest.repos.createDeploymentStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                deployment_id: deploymentId,
+                state: state,
+                description: description,
+                environment_url: `https://production-${{ matrix.agent }}.example.com`,
+                log_url: `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+              });
+
+              console.log(`Deployment status updated to: ${state}`);
+            } catch (error) {
+              console.error('Failed to update deployment status:', error);
+            }
+
+      - name: Add deployment tracking
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deploymentId = '${{ steps.deployment.outputs.deployment-id }}';
+            const jobStatus = '${{ job.status }}';
+            const agent = '${{ matrix.agent }}';
+            const agentType = '${{ steps.agent-info.outputs.agent-type }}';
+
+            console.log('Adding deployment tracking for:', { agent, agentType, deploymentId, jobStatus });
+
+            // Create deployment summary
+            const deploymentInfo = `
+            ## 🚀 Deployment Summary for ${agent}
+
+            **Agent:** \`${agent}\`
+            **Type:** \`${agentType}\`
+            **Environment:** \`production-${agent}\`
+            **Deployment ID:** \`${deploymentId || 'N/A'}\`
+            **Status:** ${jobStatus === 'success' ? '✅ Success' : '❌ Failed'}
+            **Trigger:** \`${{ github.event_name }}\`
+            **Branch:** \`${{ github.ref_name }}\`
+            **Workflow Run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+            ${deploymentId ? '[View Deployment Details](https://github.com/${{ github.repository }}/deployments)' : ''}
+            `;
+
+            // Add labels to PR if this is a pull request
             if (context.payload.pull_request) {
               try {
+                const labels = [
+                  `deployed:${agent}`,
+                  `agent-type:${agentType}`,
+                  `deployment:${{ github.event_name }}`,
+                  `status:${jobStatus}`
+                ];
+
                 await github.rest.issues.addLabels({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: context.payload.pull_request.number,
                   labels: labels
                 });
+
+                console.log('Added labels to PR:', labels);
               } catch (error) {
                 console.log('Could not add labels to PR:', error.message);
               }
-            }
 
-            // Create a comment with deployment summary
-            const deploymentInfo = `
-            ## 🚀 Deployment Summary
+              // Add comment to PR
+              try {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.payload.pull_request.number,
+                  body: deploymentInfo
+                });
 
-            **Agent:** \`${{ matrix.agent }}\`
-            **Type:** \`${{ steps.agent-info.outputs.agent-type }}\`
-            **Environment:** \`production-${{ matrix.agent }}\`
-            **Deployment ID:** \`${{ steps.deployment.outputs.deployment-id }}\`
-            **Status:** ${context.job.status === 'success' ? '✅ Success' : '❌ Failed'}
-            **Trigger:** \`${{ github.event_name }}\`
-            **Branch:** \`${{ github.ref_name }}\`
-
-            [View Deployment Details](https://github.com/${{ github.repository }}/deployments)
-            `;
-
-            if (context.payload.pull_request) {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.payload.pull_request.number,
-                body: deploymentInfo
-              });
+                console.log('Added deployment comment to PR');
+              } catch (error) {
+                console.log('Could not add comment to PR:', error.message);
+              }
             }
