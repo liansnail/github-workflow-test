@@ -1,5 +1,6 @@
 name: Detect Changes and Deploy
 
+run-name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.agents || github.event.head_commit.message || 'Deploy' }}
 
 on:
   push:
